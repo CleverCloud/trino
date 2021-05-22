@@ -49,6 +49,7 @@ import io.trino.cost.StatsCalculator;
 import io.trino.cost.StatsCalculatorModule.StatsRulesProvider;
 import io.trino.cost.StatsNormalizer;
 import io.trino.cost.TaskCountEstimator;
+import io.trino.dynamiccatalog.SessionCatalogProviderManager;
 import io.trino.eventlistener.EventListenerConfig;
 import io.trino.eventlistener.EventListenerManager;
 import io.trino.execution.CommentTask;
@@ -411,6 +412,7 @@ public class LocalQueryRunner
                 new CertificateAuthenticatorManager(),
                 eventListenerManager,
                 new GroupProviderManager(),
+                new SessionCatalogProviderManager(),
                 new SessionPropertyDefaults(nodeInfo));
 
         connectorManager.addConnectorFactory(globalSystemConnectorFactory, globalSystemConnectorFactory.getClass()::getClassLoader);

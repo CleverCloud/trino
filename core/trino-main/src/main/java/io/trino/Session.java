@@ -17,10 +17,12 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Maps;
+import io.airlift.log.Logger;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
 import io.trino.client.ProtocolHeaders;
 import io.trino.connector.CatalogName;
+import io.trino.metadata.Catalog;
 import io.trino.metadata.SessionPropertyManager;
 import io.trino.security.AccessControl;
 import io.trino.security.SecurityContext;
@@ -30,6 +32,7 @@ import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.security.Identity;
 import io.trino.spi.security.SelectedRole;
 import io.trino.spi.session.ResourceEstimates;
+import io.trino.spi.sessioncatalog.SessionCatalogMetadata;
 import io.trino.spi.type.TimeZoneKey;
 import io.trino.sql.SqlPath;
 import io.trino.sql.tree.Execute;
@@ -59,6 +62,7 @@ import static java.util.Objects.requireNonNull;
 
 public final class Session
 {
+    private static final Logger log = Logger.get("Session");
     private final QueryId queryId;
     private final Optional<TransactionId> transactionId;
     private final boolean clientTransactionSupport;
@@ -85,6 +89,13 @@ public final class Session
     private final SessionPropertyManager sessionPropertyManager;
     private final Map<String, String> preparedStatements;
     private final ProtocolHeaders protocolHeaders;
+
+    public SessionPropertyManager getSessionPropertyManager()
+    {
+        return sessionPropertyManager;
+    }
+
+    private final Map<String, SessionCatalogMetadata> sessionCatalogsProperties;
 
     public Session(
             QueryId queryId,
@@ -150,6 +161,19 @@ public final class Session
         checkArgument(transactionId.isEmpty() || unprocessedCatalogProperties.isEmpty(), "Catalog session properties cannot be set if there is an open transaction");
 
         checkArgument(catalog.isPresent() || schema.isEmpty(), "schema is set but catalog is not");
+
+        this.sessionCatalogsProperties = new HashMap<>();
+    }
+
+    public void addSessionCatalogProperties(SessionCatalogMetadata sessionCatalogMetadata)
+    {
+        log.info("adding sessionCatalog %s to session %s", sessionCatalogMetadata.toString(), this.transactionId);
+        this.sessionCatalogsProperties.put(sessionCatalogMetadata.getCatalogName(), sessionCatalogMetadata);
+    }
+
+    public Map<String, SessionCatalogMetadata> getSessionCatalogsProperties()
+    {
+        return sessionCatalogsProperties;
     }
 
     public QueryId getQueryId()
@@ -493,7 +517,8 @@ public final class Session
                 unprocessedCatalogProperties,
                 identity.getCatalogRoles(),
                 preparedStatements,
-                protocolHeaders.getProtocolName());
+                protocolHeaders.getProtocolName(),
+                sessionCatalogsProperties);
     }
 
     @Override
@@ -562,6 +587,7 @@ public final class Session
         private final Map<String, Map<String, String>> catalogSessionProperties = new HashMap<>();
         private final SessionPropertyManager sessionPropertyManager;
         private final Map<String, String> preparedStatements = new HashMap<>();
+        private final Map<String, Catalog> catalogMap = new HashMap<>();
         private ProtocolHeaders protocolHeaders = TRINO_HEADERS;
 
         private SessionBuilder(SessionPropertyManager sessionPropertyManager)

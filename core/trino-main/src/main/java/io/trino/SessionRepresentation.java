@@ -24,6 +24,7 @@ import io.trino.spi.security.BasicPrincipal;
 import io.trino.spi.security.Identity;
 import io.trino.spi.security.SelectedRole;
 import io.trino.spi.session.ResourceEstimates;
+import io.trino.spi.sessioncatalog.SessionCatalogMetadata;
 import io.trino.spi.type.TimeZoneKey;
 import io.trino.sql.SqlPath;
 import io.trino.transaction.TransactionId;
@@ -68,6 +69,7 @@ public final class SessionRepresentation
     private final Map<String, SelectedRole> catalogRoles;
     private final Map<String, String> preparedStatements;
     private final String protocolName;
+    private final Map<String, SessionCatalogMetadata> sessionCatalogMetadata;
 
     @JsonCreator
     public SessionRepresentation(
@@ -97,7 +99,8 @@ public final class SessionRepresentation
             @JsonProperty("unprocessedCatalogProperties") Map<String, Map<String, String>> unprocessedCatalogProperties,
             @JsonProperty("catalogRoles") Map<String, SelectedRole> catalogRoles,
             @JsonProperty("preparedStatements") Map<String, String> preparedStatements,
-            @JsonProperty("protocolName") String protocolName)
+            @JsonProperty("protocolName") String protocolName,
+            @JsonProperty("sessionCatalogMetadata") Map<String, SessionCatalogMetadata> sessionCatalogMetadata)
     {
         this.queryId = requireNonNull(queryId, "queryId is null");
         this.transactionId = requireNonNull(transactionId, "transactionId is null");
@@ -136,6 +139,13 @@ public final class SessionRepresentation
             unprocessedCatalogPropertiesBuilder.put(entry.getKey(), ImmutableMap.copyOf(entry.getValue()));
         }
         this.unprocessedCatalogProperties = unprocessedCatalogPropertiesBuilder.build();
+        this.sessionCatalogMetadata = sessionCatalogMetadata;
+    }
+
+    @JsonProperty
+    public Map<String, SessionCatalogMetadata> getSessionCatalogMetadata()
+    {
+        return sessionCatalogMetadata;
     }
 
     @JsonProperty
@@ -313,7 +323,7 @@ public final class SessionRepresentation
 
     public Session toSession(SessionPropertyManager sessionPropertyManager, Map<String, String> extraCredentials)
     {
-        return new Session(
+        Session session = new Session(
                 new QueryId(queryId),
                 transactionId,
                 clientTransactionSupport,
@@ -344,5 +354,8 @@ public final class SessionRepresentation
                 sessionPropertyManager,
                 preparedStatements,
                 createProtocolHeaders(protocolName));
+
+        sessionCatalogMetadata.entrySet().forEach(entry -> session.addSessionCatalogProperties(entry.getValue()));
+        return session;
     }
 }

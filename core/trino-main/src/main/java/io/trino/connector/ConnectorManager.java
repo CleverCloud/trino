@@ -51,6 +51,7 @@ import io.trino.spi.connector.SystemTable;
 import io.trino.spi.eventlistener.EventListener;
 import io.trino.spi.procedure.Procedure;
 import io.trino.spi.session.PropertyMetadata;
+import io.trino.spi.sessioncatalog.SessionCatalogMetadata;
 import io.trino.spi.type.TypeOperators;
 import io.trino.split.PageSinkManager;
 import io.trino.split.PageSourceManager;
@@ -186,6 +187,77 @@ public class ConnectorManager
                 connectorFactory.getName(),
                 new InternalConnectorFactory(connectorFactory, duplicatePluginClassLoaderFactory));
         checkArgument(existingConnectorFactory == null, "Connector '%s' is already registered", connectorFactory.getName());
+    }
+
+    public Optional<Catalog> createOptionalSessionCatalog(SessionCatalogMetadata sessionCatalogMetadata)
+    {
+        requireNonNull(sessionCatalogMetadata, "sessionCatalogMetadata is null");
+        if (!connectorFactories.containsKey(sessionCatalogMetadata.getConnectorName())) {
+            return Optional.empty();
+        }
+        return createOptionalSessionCatalog(sessionCatalogMetadata.getCatalogName(), sessionCatalogMetadata.getProperties(), connectorFactories.get(sessionCatalogMetadata.getConnectorName()));
+    }
+
+    private Optional<Catalog> createOptionalSessionCatalog(String catalog, Map<String, String> properties, InternalConnectorFactory factory)
+    {
+        log.info("creating optional session catalog %s", catalog);
+        CatalogName catalogName = new CatalogName(catalog);
+        // create all connectors before adding, so a broken connector does not leave the system half updated
+        MaterializedConnector connector = new MaterializedConnector(catalogName, createConnector(catalogName, factory, properties));
+
+        ConnectorHandleResolver connectorHandleResolver = connector.getConnector().getHandleResolver()
+                .orElseGet(factory.getConnectorFactory()::getHandleResolver);
+        checkArgument(connectorHandleResolver != null, "Connector %s does not have a handle resolver", factory);
+
+        MaterializedConnector informationSchemaConnector = new MaterializedConnector(
+                createInformationSchemaCatalogName(catalogName),
+                new InformationSchemaConnector(catalogName.getCatalogName(), nodeManager, metadataManager, accessControlManager));
+
+        CatalogName systemId = createSystemTablesCatalogName(catalogName);
+        SystemTablesProvider systemTablesProvider;
+
+        if (nodeManager.getCurrentNode().isCoordinator()) {
+            systemTablesProvider = new CoordinatorSystemTablesProvider(
+                    transactionManager,
+                    metadataManager,
+                    catalogName.getCatalogName(),
+                    new StaticSystemTablesProvider(connector.getSystemTables()));
+        }
+        else {
+            systemTablesProvider = new StaticSystemTablesProvider(connector.getSystemTables());
+        }
+
+        MaterializedConnector systemConnector = new MaterializedConnector(systemId, new SystemConnector(
+                nodeManager,
+                systemTablesProvider,
+                transactionId -> transactionManager.getConnectorTransaction(transactionId, catalogName)));
+        try {
+            if (!connectors.containsKey(connector.getCatalogName())) {
+                addConnectorInternal(connector);
+                addConnectorInternal(informationSchemaConnector);
+                addConnectorInternal(systemConnector);
+            }
+            handleResolver.addSessionCatalogHandleResolver(catalogName.getCatalogName(), connectorHandleResolver);
+        }
+        catch (Throwable e) {
+            // TODO(PZ): remove temporary connectors
+            removeConnectorInternal(systemConnector.getCatalogName());
+            removeConnectorInternal(informationSchemaConnector.getCatalogName());
+            removeConnectorInternal(connector.getCatalogName());
+            throw e;
+        }
+
+        SecurityManagement securityManagement = connector.getAccessControl().isPresent() ? CONNECTOR : SYSTEM;
+
+        return Optional.of(new Catalog(
+                catalogName.getCatalogName(),
+                connector.getCatalogName(),
+                connector.getConnector(),
+                securityManagement,
+                informationSchemaConnector.getCatalogName(),
+                informationSchemaConnector.getConnector(),
+                systemConnector.getCatalogName(),
+                systemConnector.getConnector()));
     }
 
     public synchronized CatalogName createCatalog(String catalogName, String connectorName, Map<String, String> properties)

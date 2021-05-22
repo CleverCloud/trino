@@ -36,6 +36,7 @@ import io.trino.client.NodeVersion;
 import io.trino.connector.ConnectorManager;
 import io.trino.connector.system.SystemConnectorModule;
 import io.trino.dispatcher.DispatchManager;
+import io.trino.dynamiccatalog.SessionCatalogProviderManager;
 import io.trino.event.SplitMonitor;
 import io.trino.execution.DynamicFilterConfig;
 import io.trino.execution.ExplainAnalyzeContext;
@@ -73,6 +74,8 @@ import io.trino.metadata.MaterializedViewPropertyManager;
 import io.trino.metadata.Metadata;
 import io.trino.metadata.MetadataManager;
 import io.trino.metadata.SchemaPropertyManager;
+import io.trino.metadata.SessionCatalog;
+import io.trino.metadata.SessionCatalogProvider;
 import io.trino.metadata.SessionPropertyManager;
 import io.trino.metadata.StaticCatalogStore;
 import io.trino.metadata.StaticCatalogStoreConfig;
@@ -412,7 +415,10 @@ public class ServerMainModule
                 .to(ServerPluginsProvider.class).in(Scopes.SINGLETON);
         configBinder(binder).bindConfig(ServerPluginsProviderConfig.class);
 
+        // catalog managers
         binder.bind(CatalogManager.class).in(Scopes.SINGLETON);
+        binder.bind(SessionCatalogProviderManager.class).in(Scopes.SINGLETON);
+        binder.bind(SessionCatalog.class).to(SessionCatalogProvider.class).in(Scopes.SINGLETON);
 
         // block encodings
         jsonBinder(binder).addSerializerBinding(Block.class).to(BlockJsonSerde.Serializer.class);

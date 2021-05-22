@@ -16,6 +16,7 @@ package io.trino.server;
 import com.google.common.collect.ImmutableList;
 import io.airlift.log.Logger;
 import io.trino.connector.ConnectorManager;
+import io.trino.dynamiccatalog.SessionCatalogProviderManager;
 import io.trino.eventlistener.EventListenerManager;
 import io.trino.execution.resourcegroups.ResourceGroupManager;
 import io.trino.metadata.MetadataManager;
@@ -34,6 +35,7 @@ import io.trino.spi.security.GroupProviderFactory;
 import io.trino.spi.security.PasswordAuthenticatorFactory;
 import io.trino.spi.security.SystemAccessControlFactory;
 import io.trino.spi.session.SessionPropertyConfigurationManagerFactory;
+import io.trino.spi.sessioncatalog.CatalogProviderFactory;
 import io.trino.spi.type.ParametricType;
 import io.trino.spi.type.Type;
 
@@ -72,6 +74,7 @@ public class PluginManager
     private final CertificateAuthenticatorManager certificateAuthenticatorManager;
     private final EventListenerManager eventListenerManager;
     private final GroupProviderManager groupProviderManager;
+    private final SessionCatalogProviderManager dynamicCatalogManager;
     private final SessionPropertyDefaults sessionPropertyDefaults;
     private final AtomicBoolean pluginsLoading = new AtomicBoolean();
     private final AtomicBoolean pluginsLoaded = new AtomicBoolean();
@@ -87,6 +90,7 @@ public class PluginManager
             CertificateAuthenticatorManager certificateAuthenticatorManager,
             EventListenerManager eventListenerManager,
             GroupProviderManager groupProviderManager,
+            SessionCatalogProviderManager sessionCatalogProviderManager,
             SessionPropertyDefaults sessionPropertyDefaults)
     {
         this.pluginsProvider = requireNonNull(pluginsProvider, "pluginsProvider is null");
@@ -99,6 +103,7 @@ public class PluginManager
         this.eventListenerManager = requireNonNull(eventListenerManager, "eventListenerManager is null");
         this.groupProviderManager = requireNonNull(groupProviderManager, "groupProviderManager is null");
         this.sessionPropertyDefaults = requireNonNull(sessionPropertyDefaults, "sessionPropertyDefaults is null");
+        this.dynamicCatalogManager = requireNonNull(sessionCatalogProviderManager, "Session is null");
     }
 
     public void loadPlugins()
@@ -212,6 +217,11 @@ public class PluginManager
         for (GroupProviderFactory groupProviderFactory : plugin.getGroupProviderFactories()) {
             log.info("Registering group provider %s", groupProviderFactory.getName());
             groupProviderManager.addGroupProviderFactory(groupProviderFactory);
+        }
+
+        for (CatalogProviderFactory catalogProviderFactory : plugin.getDynamicCatalogManagerFactories()) {
+            log.info("Registering dynamic catalog provider %s", catalogProviderFactory.getName());
+            dynamicCatalogManager.addDynamicCatalogFactory(catalogProviderFactory);
         }
     }
 

@@ -40,6 +40,7 @@ import io.trino.memory.MemoryPoolAssignment;
 import io.trino.memory.MemoryPoolAssignmentsRequest;
 import io.trino.memory.NodeMemoryConfig;
 import io.trino.memory.QueryContext;
+import io.trino.metadata.SessionCatalog;
 import io.trino.spi.QueryId;
 import io.trino.spi.TrinoException;
 import io.trino.spi.VersionEmbedder;
@@ -60,6 +61,7 @@ import javax.annotation.concurrent.GuardedBy;
 import javax.inject.Inject;
 
 import java.io.Closeable;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -117,6 +119,8 @@ public class SqlTaskManager
     @GuardedBy("this")
     private String coordinatorId;
 
+    private final SessionCatalog sessionCatalog;
+
     private final CounterStat failedTasks = new CounterStat();
 
     @Inject
@@ -133,7 +137,8 @@ public class SqlTaskManager
             NodeMemoryConfig nodeMemoryConfig,
             LocalSpillManager localSpillManager,
             NodeSpillConfig nodeSpillConfig,
-            GcMonitor gcMonitor)
+            GcMonitor gcMonitor,
+            SessionCatalog sessionCatalog)
     {
         requireNonNull(nodeInfo, "nodeInfo is null");
         requireNonNull(config, "config is null");
@@ -175,6 +180,7 @@ public class SqlTaskManager
                         maxBufferSize,
                         maxBroadcastBufferSize,
                         failedTasks)));
+        this.sessionCatalog = sessionCatalog;
     }
 
     private QueryContext createQueryContext(
@@ -400,6 +406,9 @@ public class SqlTaskManager
         requireNonNull(fragment, "fragment is null");
         requireNonNull(sources, "sources is null");
         requireNonNull(outputBuffers, "outputBuffers is null");
+
+        // loading sessionCatalogs
+        this.sessionCatalog.loadSessionCatalog(new ArrayList<>(session.getSessionCatalogsProperties().values()));
 
         SqlTask sqlTask = tasks.getUnchecked(taskId);
         QueryContext queryContext = sqlTask.getQueryContext();

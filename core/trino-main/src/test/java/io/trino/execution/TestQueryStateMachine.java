@@ -23,6 +23,7 @@ import io.trino.client.FailureInfo;
 import io.trino.execution.warnings.WarningCollector;
 import io.trino.memory.VersionedMemoryPoolId;
 import io.trino.metadata.Metadata;
+import io.trino.metadata.NoOpSessionCatalog;
 import io.trino.plugin.base.security.AllowAllSystemAccessControl;
 import io.trino.plugin.base.security.DefaultSystemAccessControl;
 import io.trino.security.AccessControlConfig;
@@ -528,7 +529,8 @@ public class TestQueryStateMachine
                 ticker,
                 metadata,
                 WarningCollector.NOOP,
-                QUERY_TYPE);
+                QUERY_TYPE,
+                new NoOpSessionCatalog());
         stateMachine.setInputs(INPUTS);
         stateMachine.setOutput(OUTPUT);
         stateMachine.setColumns(OUTPUT_FIELD_NAMES, OUTPUT_FIELD_TYPES);

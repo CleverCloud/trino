@@ -319,6 +319,8 @@ public class InMemoryTransactionManager
         private final Map<CatalogName, Catalog> catalogsByName = new ConcurrentHashMap<>();
         @GuardedBy("this")
         private final Map<CatalogName, CatalogMetadata> catalogMetadata = new ConcurrentHashMap<>();
+        @GuardedBy("this")
+        private final Map<String, Catalog> sessionCatalogs = new ConcurrentHashMap<>();
 
         public TransactionMetadata(
                 TransactionId transactionId,
@@ -378,6 +380,8 @@ public class InMemoryTransactionManager
             catalogManager.getCatalogs().stream()
                     .forEach(catalog -> catalogNames.putIfAbsent(catalog.getCatalogName(), catalog.getConnectorCatalogName()));
 
+            sessionCatalogs.forEach((catalogName, catalog) -> catalogNames.put(catalogName, catalog.getConnectorCatalogName()));
+
             return ImmutableMap.copyOf(catalogNames);
         }
 
@@ -385,10 +389,15 @@ public class InMemoryTransactionManager
         {
             Optional<Catalog> catalog = catalogByName.get(catalogName);
             if (catalog == null) {
-                catalog = catalogManager.getCatalog(catalogName);
-                catalogByName.put(catalogName, catalog);
-                if (catalog.isPresent()) {
-                    registerCatalog(catalog.get());
+                if (sessionCatalogs.containsKey(catalogName)) {
+                    catalog = Optional.of(sessionCatalogs.get(catalogName));
+                }
+                else {
+                    catalog = catalogManager.getCatalog(catalogName);
+                    catalogByName.put(catalogName, catalog);
+                    if (catalog.isPresent()) {
+                        registerCatalog(catalog.get());
+                    }
                 }
             }
             return catalog.map(Catalog::getConnectorCatalogName);
@@ -408,6 +417,9 @@ public class InMemoryTransactionManager
             CatalogMetadata catalogMetadata = this.catalogMetadata.get(catalogName);
             if (catalogMetadata == null) {
                 Catalog catalog = catalogsByName.get(catalogName);
+                if (catalog == null && this.sessionCatalogs.containsKey(catalogName.getCatalogName())) {
+                    catalog = this.sessionCatalogs.get(catalogName.getCatalogName());
+                }
                 verifyNotNull(catalog, "Unknown catalog: %s", catalogName);
                 Connector connector = catalog.getConnector(catalogName);
 
@@ -558,6 +570,10 @@ public class InMemoryTransactionManager
             return new TransactionInfo(transactionId, isolationLevel, readOnly, autoCommitContext, createTime, idleTime, catalogNames, writtenConnectorId);
         }
 
+        public void setSessionCatalogs()
+        {
+        }
+
         private static class ConnectorTransactionMetadata
         {
             private final CatalogName catalogName;
@@ -621,5 +637,11 @@ public class InMemoryTransactionManager
                 }
             }
         }
+    }
+
+    @Override
+    public void updateSessionsCatalogs(TransactionId transactionId, Map<String, Catalog> catalogs)
+    {
+        catalogs.forEach((key, value) -> this.transactions.get(transactionId).sessionCatalogs.put(key, value));
     }
 }

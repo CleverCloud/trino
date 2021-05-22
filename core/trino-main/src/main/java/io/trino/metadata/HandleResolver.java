@@ -55,6 +55,13 @@ public final class HandleResolver
         addCatalogHandleResolver("$empty", new EmptySplitHandleResolver());
     }
 
+    public void addSessionCatalogHandleResolver(String catalogName, ConnectorHandleResolver resolver)
+    {
+        requireNonNull(catalogName, "catalogName is null");
+        requireNonNull(resolver, "resolver is null");
+        handleResolvers.putIfAbsent(catalogName, new MaterializedHandleResolver(resolver));
+    }
+
     public void addCatalogHandleResolver(String catalogName, ConnectorHandleResolver resolver)
     {
         requireNonNull(catalogName, "catalogName is null");

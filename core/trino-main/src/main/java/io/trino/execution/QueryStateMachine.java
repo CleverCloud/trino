@@ -29,7 +29,10 @@ import io.trino.execution.QueryExecution.QueryOutputInfo;
 import io.trino.execution.StateMachine.StateChangeListener;
 import io.trino.execution.warnings.WarningCollector;
 import io.trino.memory.VersionedMemoryPoolId;
+import io.trino.metadata.Catalog;
 import io.trino.metadata.Metadata;
+import io.trino.metadata.NoOpSessionCatalog;
+import io.trino.metadata.SessionCatalog;
 import io.trino.operator.BlockedReason;
 import io.trino.operator.OperatorStats;
 import io.trino.security.AccessControl;
@@ -196,6 +199,38 @@ public class QueryStateMachine
         this.queryType = requireNonNull(queryType, "queryType is null");
     }
 
+    public static QueryStateMachine begin(
+            String query,
+            Optional<String> preparedQuery,
+            Session session,
+            URI self,
+            ResourceGroupId resourceGroup,
+            boolean transactionControl,
+            TransactionManager transactionManager,
+            AccessControl accessControl,
+            Executor executor,
+            Metadata metadata,
+            WarningCollector warningCollector,
+            Optional<QueryType> queryType,
+            SessionCatalog sessionCatalog)
+    {
+        return beginWithTicker(
+                query,
+                preparedQuery,
+                session,
+                self,
+                resourceGroup,
+                transactionControl,
+                transactionManager,
+                accessControl,
+                executor,
+                Ticker.systemTicker(),
+                metadata,
+                warningCollector,
+                queryType,
+                sessionCatalog);
+    }
+
     /**
      * Created QueryStateMachines must be transitioned to terminal states to clean up resources.
      */
@@ -226,7 +261,8 @@ public class QueryStateMachine
                 Ticker.systemTicker(),
                 metadata,
                 warningCollector,
-                queryType);
+                queryType,
+                new NoOpSessionCatalog());
     }
 
     static QueryStateMachine beginWithTicker(
@@ -242,7 +278,8 @@ public class QueryStateMachine
             Ticker ticker,
             Metadata metadata,
             WarningCollector warningCollector,
-            Optional<QueryType> queryType)
+            Optional<QueryType> queryType,
+            SessionCatalog sessionCatalog)
     {
         // If there is not an existing transaction, begin an auto commit transaction
         if (session.getTransactionId().isEmpty() && !transactionControl) {
@@ -250,6 +287,8 @@ public class QueryStateMachine
             TransactionId transactionId = transactionManager.beginTransaction(true);
             session = session.beginTransactionId(transactionId, transactionManager, accessControl);
         }
+        Map<String, Catalog> sessionCatalogs = sessionCatalog.getAndLoadSessionCatalog(session);
+        transactionManager.updateSessionsCatalogs(session.getTransactionId().get(), sessionCatalogs);
 
         QueryStateMachine queryStateMachine = new QueryStateMachine(
                 query,

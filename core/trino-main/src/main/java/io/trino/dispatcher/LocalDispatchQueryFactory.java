@@ -28,6 +28,7 @@ import io.trino.execution.QueryStateMachine;
 import io.trino.execution.warnings.WarningCollector;
 import io.trino.execution.warnings.WarningCollectorFactory;
 import io.trino.metadata.Metadata;
+import io.trino.metadata.SessionCatalog;
 import io.trino.security.AccessControl;
 import io.trino.server.protocol.Slug;
 import io.trino.spi.TrinoException;
@@ -59,6 +60,8 @@ public class LocalDispatchQueryFactory
 
     private final ClusterSizeMonitor clusterSizeMonitor;
 
+    private final SessionCatalog sessionCatalog;
+
     private final Map<Class<? extends Statement>, QueryExecutionFactory<?>> executionFactories;
     private final WarningCollectorFactory warningCollectorFactory;
     private final ListeningExecutorService executor;
@@ -74,7 +77,8 @@ public class LocalDispatchQueryFactory
             Map<Class<? extends Statement>, QueryExecutionFactory<?>> executionFactories,
             WarningCollectorFactory warningCollectorFactory,
             ClusterSizeMonitor clusterSizeMonitor,
-            DispatchExecutor dispatchExecutor)
+            DispatchExecutor dispatchExecutor,
+            SessionCatalog sessionCatalog)
     {
         this.queryManager = requireNonNull(queryManager, "queryManager is null");
         this.transactionManager = requireNonNull(transactionManager, "transactionManager is null");
@@ -88,6 +92,7 @@ public class LocalDispatchQueryFactory
         this.clusterSizeMonitor = requireNonNull(clusterSizeMonitor, "clusterSizeMonitor is null");
 
         this.executor = requireNonNull(dispatchExecutor, "dispatchExecutor is null").getExecutor();
+        this.sessionCatalog = sessionCatalog;
     }
 
     @Override
@@ -111,7 +116,8 @@ public class LocalDispatchQueryFactory
                 executor,
                 metadata,
                 warningCollector,
-                getQueryType(preparedQuery.getStatement()));
+                getQueryType(preparedQuery.getStatement()),
+                sessionCatalog);
 
         // It is important that `queryCreatedEvent` is called here. Moving it past the `executor.submit` below
         // can result in delivering query-created event after query analysis has already started.

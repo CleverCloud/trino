@@ -38,6 +38,7 @@ import io.airlift.log.Logger;
 import io.airlift.node.NodeModule;
 import io.airlift.tracetoken.TraceTokenModule;
 import io.trino.client.NodeVersion;
+import io.trino.dynamiccatalog.SessionCatalogProviderManager;
 import io.trino.eventlistener.EventListenerManager;
 import io.trino.eventlistener.EventListenerModule;
 import io.trino.execution.resourcegroups.ResourceGroupManager;
@@ -134,6 +135,7 @@ public class Server
             injector.getInstance(EventListenerManager.class).loadEventListeners();
             injector.getInstance(GroupProviderManager.class).loadConfiguredGroupProvider();
             injector.getInstance(CertificateAuthenticatorManager.class).loadCertificateAuthenticator();
+            injector.getInstance(SessionCatalogProviderManager.class).loadConfiguredCatalogProvider();
 
             injector.getInstance(Announcer.class).start();
 
