@@ -13,8 +13,7 @@
  */
 package io.trino.plugin.druid;
 
-import io.trino.Session;
-import io.trino.plugin.jdbc.JdbcMetadataConfig;
+import io.trino.plugin.jdbc.BaseJdbcConnectorTest;
 import io.trino.plugin.jdbc.JdbcTableHandle;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.SchemaTableName;
@@ -23,98 +22,28 @@ import io.trino.sql.planner.plan.AggregationNode;
 import io.trino.sql.planner.plan.JoinNode;
 import io.trino.sql.planner.plan.TableScanNode;
 import io.trino.sql.planner.plan.TopNNode;
-import io.trino.testing.BaseConnectorTest;
 import io.trino.testing.MaterializedResult;
 import io.trino.testing.TestingConnectorBehavior;
 import io.trino.testing.assertions.Assert;
+import io.trino.testing.sql.SqlExecutor;
 import org.intellij.lang.annotations.Language;
+import org.testng.SkipException;
 import org.testng.annotations.AfterClass;
 import org.testng.annotations.Test;
 
-import static com.google.common.base.Verify.verify;
 import static io.trino.plugin.druid.DruidQueryRunner.copyAndIngestTpchData;
+import static io.trino.plugin.druid.DruidTpchTables.SELECT_FROM_ORDERS;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.anyTree;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.node;
 import static io.trino.testing.MaterializedResult.resultBuilder;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.testng.Assert.assertFalse;
 
 public abstract class BaseDruidConnectorTest
-        extends BaseConnectorTest
+        extends BaseJdbcConnectorTest
 {
-    protected static final String SELECT_FROM_ORDERS = "SELECT " +
-            "orderdate, " +
-            "orderdate AS orderdate_druid_ts, " + // Druid stores the orderdate_druid_ts column as __time column.
-            "orderkey, " +
-            "custkey, " +
-            "orderstatus, " +
-            "totalprice, " +
-            "orderpriority, " +
-            "clerk, " +
-            "shippriority, " +
-            "comment " +
-            "FROM tpch.tiny.orders";
-
-    protected static final String SELECT_FROM_LINEITEM = " SELECT " +
-            "orderkey, " +
-            "partkey, " +
-            "suppkey, " +
-            "linenumber, " +
-            "quantity, " +
-            "extendedprice, " +
-            "discount, " +
-            "tax, " +
-            "returnflag, " +
-            "linestatus, " +
-            "shipdate, " +
-            "shipdate AS shipdate_druid_ts, " +  // Druid stores the shipdate_druid_ts column as __time column.
-            "commitdate, " +
-            "receiptdate, " +
-            "shipinstruct, " +
-            "shipmode, " +
-            "comment " +
-            "FROM tpch.tiny.lineitem";
-
-    protected static final String SELECT_FROM_NATION = " SELECT " +
-            "nationkey, " +
-            "name, " +
-            "regionkey, " +
-            "comment, " +
-            "'1995-01-02' AS nation_druid_dummy_ts " + // Dummy timestamp for Druid __time column
-            "FROM tpch.tiny.nation";
-
-    protected static final String SELECT_FROM_REGION = " SELECT " +
-            "regionkey, " +
-            "name, " +
-            "comment, " +
-            "'1995-01-02' AS region_druid_dummy_ts " + // Dummy timestamp for Druid __time column
-            "FROM tpch.tiny.region";
-
-    protected static final String SELECT_FROM_PART = " SELECT " +
-            "partkey, " +
-            "name, " +
-            "mfgr, " +
-            "brand, " +
-            "type, " +
-            "size, " +
-            "container, " +
-            "retailprice, " +
-            "comment, " +
-            "'1995-01-02' AS part_druid_dummy_ts " + // Dummy timestamp for Druid __time column;
-            "FROM tpch.tiny.part";
-
-    protected static final String SELECT_FROM_CUSTOMER = " SELECT " +
-            "custkey, " +
-            "name, " +
-            "address, " +
-            "nationkey, " +
-            "phone, " +
-            "acctbal, " +
-            "mktsegment, " +
-            "comment, " +
-            "'1995-01-02' AS customer_druid_dummy_ts " +  // Dummy timestamp for Druid __time column
-            "FROM tpch.tiny.customer";
-
     protected TestingDruidServer druidServer;
 
     @AfterClass(alwaysRun = true)
@@ -134,14 +63,22 @@ public abstract class BaseDruidConnectorTest
             case SUPPORTS_CREATE_SCHEMA:
             case SUPPORTS_CREATE_TABLE:
             case SUPPORTS_CREATE_TABLE_WITH_DATA:
+            case SUPPORTS_ADD_COLUMN:
             case SUPPORTS_RENAME_TABLE:
             case SUPPORTS_COMMENT_ON_COLUMN:
             case SUPPORTS_COMMENT_ON_TABLE:
             case SUPPORTS_TOPN_PUSHDOWN:
+            case SUPPORTS_AGGREGATION_PUSHDOWN:
                 return false;
             default:
                 return super.hasBehavior(connectorBehavior);
         }
+    }
+
+    @Override
+    protected SqlExecutor onRemoteDatabase()
+    {
+        return druidServer::execute;
     }
 
     @Test
@@ -343,12 +280,47 @@ public abstract class BaseDruidConnectorTest
                 .isNotFullyPushedDown(joinOverTableScans);
     }
 
-    protected Session joinPushdownEnabled(Session session)
+    @Test
+    @Override
+    public void testInsertNegativeDate()
     {
-        // If join pushdown gets enabled by default, tests should use default session
-        verify(!new JdbcMetadataConfig().isJoinPushdownEnabled());
-        return Session.builder(session)
-                .setCatalogSessionProperty(session.getCatalog().orElseThrow(), "join_pushdown_enabled", "true")
-                .build();
+        throw new SkipException("Druid connector does not map 'orderdate' column to date type and INSERT statement");
+    }
+
+    @Test
+    @Override
+    public void testDateYearOfEraPredicate()
+    {
+        throw new SkipException("Druid connector does not map 'orderdate' column to date type");
+    }
+
+    @Override
+    public void testCharTrailingSpace()
+    {
+        assertThatThrownBy(super::testCharTrailingSpace)
+                .hasMessageContaining("Error while executing SQL \"CREATE TABLE druid.char_trailing_space");
+        throw new SkipException("Implement test for Druid");
+    }
+
+    @Override
+    public void testNativeQuerySelectFromTestTable()
+    {
+        throw new SkipException("cannot create test table for Druid");
+    }
+
+    @Override
+    public void testNativeQueryCreateStatement()
+    {
+        // override because Druid fails to prepare statement, while other connectors succeed in preparing statement and then fail because of no metadata available
+        assertFalse(getQueryRunner().tableExists(getSession(), "numbers"));
+        assertThatThrownBy(() -> query("SELECT * FROM TABLE(system.query(query => 'CREATE TABLE numbers(n INTEGER)'))"))
+                .hasMessageContaining("Failed to get table handle for prepared query");
+        assertFalse(getQueryRunner().tableExists(getSession(), "numbers"));
+    }
+
+    @Override
+    public void testNativeQueryInsertStatementTableExists()
+    {
+        throw new SkipException("cannot create test table for Druid");
     }
 }

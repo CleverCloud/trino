@@ -13,23 +13,26 @@
  */
 package io.trino.sql.query;
 
-import org.testng.annotations.AfterClass;
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.TestInstance.Lifecycle.PER_CLASS;
 
+@TestInstance(PER_CLASS)
 public class TestSetDigestFunctions
 {
     private QueryAssertions assertions;
 
-    @BeforeClass
+    @BeforeAll
     public void init()
     {
         assertions = new QueryAssertions();
     }
 
-    @AfterClass(alwaysRun = true)
+    @AfterAll
     public void teardown()
     {
         assertions.close();
@@ -37,12 +40,30 @@ public class TestSetDigestFunctions
     }
 
     @Test
-    public void testCardinality()
+    public void testCardinalityForBigintSetDigest()
     {
         assertThat(assertions.query(
                 "SELECT cardinality(make_set_digest(value)) " +
                         "FROM (VALUES 1, 2, 2, 3, 3, 3, 4, 4, 4, 4, 5) T(value)"))
                 .matches("VALUES CAST(5 AS BIGINT)");
+    }
+
+    @Test
+    public void testCardinalityForVarcharSetDigest()
+    {
+        assertThat(assertions.query(
+                "SELECT cardinality(make_set_digest(value)) " +
+                        "FROM (VALUES 'trino', 'sql', 'everything', 'sql', 'trino') T(value)"))
+                .matches("VALUES CAST(3 AS BIGINT)");
+    }
+
+    @Test
+    public void testCardinalityForDateSetDigest()
+    {
+        assertThat(assertions.query(
+                "SELECT cardinality(make_set_digest(value)) " +
+                        "FROM (VALUES DATE '2001-08-22', DATE '2001-08-22', DATE '2001-08-23') T(value)"))
+                .matches("VALUES CAST(2 AS BIGINT)");
     }
 
     @Test

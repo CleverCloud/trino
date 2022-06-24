@@ -45,6 +45,7 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.stream.Stream;
 
 import static io.trino.tests.product.launcher.cli.Commands.runCommand;
 import static io.trino.tests.product.launcher.docker.DockerFiles.ROOT_PATH;
@@ -131,7 +132,7 @@ public class EnvironmentDescribe
         {
             Optional<Path> environmentLogPath = environmentUpOptions.logsDirBase.map(dir -> dir.resolve(environmentUpOptions.environment));
 
-            Environment.Builder builder = environmentFactory.get(environmentUpOptions.environment, environmentConfig)
+            Environment.Builder builder = environmentFactory.get(environmentUpOptions.environment, environmentConfig, environmentUpOptions.extraOptions)
                     .setContainerOutputMode(environmentOptions.output)
                     .setLogsBaseDir(environmentLogPath);
 
@@ -201,10 +202,12 @@ public class EnvironmentDescribe
     private static long directorySize(Path directory)
     {
         try {
-            return Files.walk(directory)
-                    .filter(path -> path.toFile().isFile())
-                    .mapToLong(path -> path.toFile().length())
-                    .sum();
+            try (Stream<Path> stream = Files.walk(directory)) {
+                return stream
+                        .filter(path -> path.toFile().isFile())
+                        .mapToLong(path -> path.toFile().length())
+                        .sum();
+            }
         }
         catch (IOException e) {
             log.warn(e, "Could not calculate directory size: %s", directory);

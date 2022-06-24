@@ -17,12 +17,14 @@ import io.airlift.slice.Slice;
 import io.airlift.slice.Slices;
 import io.trino.operator.scalar.AbstractTestFunctions;
 import io.trino.spi.TrinoException;
+import io.trino.spi.expression.StandardFunctions;
 import io.trino.type.JoniRegexp;
 import io.trino.type.LikeFunctions;
 import org.testng.annotations.Test;
 
 import java.util.Optional;
 
+import static com.google.common.base.Verify.verify;
 import static io.airlift.slice.Slices.utf8Slice;
 import static io.trino.spi.type.BooleanType.BOOLEAN;
 import static io.trino.type.LikeFunctions.isLikePattern;
@@ -48,6 +50,14 @@ public class TestLikeFunctions
     }
 
     @Test
+    public void testFunctionNameConstantsInSync()
+    {
+        // Test may need to be updated when this changes.
+        verify(StandardFunctions.LIKE_PATTERN_FUNCTION_NAME.getCatalogSchema().isEmpty());
+        assertEquals(StandardFunctions.LIKE_PATTERN_FUNCTION_NAME.getName(), LikeFunctions.LIKE_PATTERN_FUNCTION_NAME);
+    }
+
+    @Test
     public void testLikeBasic()
     {
         JoniRegexp regex = LikeFunctions.compileLikePattern(utf8Slice("f%b__"));
@@ -56,6 +66,17 @@ public class TestLikeFunctions
 
         assertFunction("'foob' LIKE 'f%b__'", BOOLEAN, false);
         assertFunction("'foob' LIKE 'f%b'", BOOLEAN, true);
+
+        // value with explicit type (formal type potentially longer than actual length)
+        assertFunction("CAST('foo' AS varchar(6)) LIKE 'foo '", BOOLEAN, false);
+        assertFunction("CAST('foo ' AS varchar(6)) LIKE 'foo '", BOOLEAN, true);
+        assertFunction("CAST('foo' AS varchar(6)) LIKE 'foo___'", BOOLEAN, false);
+        assertFunction("CAST('foo' AS varchar(6)) LIKE 'foo%'", BOOLEAN, true);
+
+        // value and pattern with explicit type (formal type potentially longer than actual length)
+        assertFunction("CAST('foo' AS varchar(6)) LIKE CAST('foo' AS varchar(6))", BOOLEAN, true);
+        assertFunction("CAST('foo' AS varchar(6)) LIKE CAST('foo  ' AS varchar(3))", BOOLEAN, true); // pattern gets truncated
+        assertFunction("CAST('foo' AS varchar(6)) LIKE CAST('foo   ' AS varchar(6))", BOOLEAN, false);
     }
 
     @Test
@@ -69,18 +90,42 @@ public class TestLikeFunctions
         assertFalse(likeChar(7L, utf8Slice("foob"), regex));
         assertFalse(likeChar(7L, offsetHeapSlice("foob"), regex));
 
-        assertFunction("cast('foob' as char(6)) LIKE 'f%b__'", BOOLEAN, true);
-        assertFunction("cast('foob' as char(7)) LIKE 'f%b__'", BOOLEAN, false);
+        // pattern shorter than value length
+        assertFunction("CAST('foo' AS char(6)) LIKE 'foo'", BOOLEAN, false);
+        assertFunction("CAST('foo' AS char(6)) LIKE 'foo  '", BOOLEAN, false);
+        assertFunction("CAST('foo' AS char(6)) LIKE 'fo_'", BOOLEAN, false);
+        assertFunction("CAST('foo' AS char(6)) LIKE 'fo%'", BOOLEAN, true);
+        assertFunction("CAST('foo' AS char(6)) LIKE '%foo'", BOOLEAN, false);
+        assertFunction("CAST('foo' AS char(6)) LIKE '_oo'", BOOLEAN, false);
+        assertFunction("CAST('foob' AS char(6)) LIKE 'f%b__'", BOOLEAN, true);
+        assertFunction("CAST('foob' AS char(7)) LIKE 'f%b__'", BOOLEAN, false);
+
+        // pattern of length equal to value length
+        assertFunction("CAST('foo' AS char(3)) LIKE 'foo'", BOOLEAN, true);
+        assertFunction("CAST('jaźń' AS char(4)) LIKE 'jaźń'", BOOLEAN, true);
+        assertFunction("CAST('foo' AS char(3)) LIKE 'fob'", BOOLEAN, false);
+        assertFunction("CAST('foo' AS char(6)) LIKE 'foo   '", BOOLEAN, true);
+        assertFunction("CAST('foo' AS char(6)) LIKE 'foo __'", BOOLEAN, true);
+        assertFunction("CAST('foo' AS char(6)) LIKE '%%%%%%'", BOOLEAN, true);
+
+        // pattern longer than value length
+        assertFunction("CAST('foo' AS char(3)) LIKE '%%foo'", BOOLEAN, true);
+        assertFunction("CAST('foo' AS char(3)) LIKE 'f#_#_' ESCAPE '#'", BOOLEAN, false);
+        assertFunction("CAST('f__' AS char(3)) LIKE 'f#_#_' ESCAPE '#'", BOOLEAN, true);
+        assertFunction("CAST('foo' AS char(6)) LIKE 'foo    '", BOOLEAN, false);
+        assertFunction("CAST('foo' AS char(6)) LIKE 'foo __ '", BOOLEAN, false);
+        assertFunction("CAST('foo' AS char(6)) LIKE '_______'", BOOLEAN, false);
+        assertFunction("CAST('foo' AS char(6)) LIKE '%%%%%%%'", BOOLEAN, true);
+        assertFunction("CAST('foo' AS char(6)) LIKE 'foo   %%%%%%%'", BOOLEAN, true);
+        assertFunction("CAST('foo' AS char(6)) LIKE 'foo  %%%%%%% '", BOOLEAN, true);
+        assertFunction("CAST('foo' AS char(6)) LIKE 'foo  %%%%%%%  '", BOOLEAN, false);
+        assertFunction("CAST('foobar' AS char(6)) LIKE 'foobar%%%%%%%'", BOOLEAN, true);
     }
 
     @Test
     public void testLikeSpacesInPattern()
     {
         JoniRegexp regex = LikeFunctions.compileLikePattern(utf8Slice("ala  "));
-        assertTrue(likeVarchar(utf8Slice("ala  "), regex));
-        assertFalse(likeVarchar(utf8Slice("ala"), regex));
-
-        regex = LikeFunctions.likePattern(5L, utf8Slice("ala"));
         assertTrue(likeVarchar(utf8Slice("ala  "), regex));
         assertFalse(likeVarchar(utf8Slice("ala"), regex));
     }

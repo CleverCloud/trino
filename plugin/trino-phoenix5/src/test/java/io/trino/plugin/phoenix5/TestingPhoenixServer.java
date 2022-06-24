@@ -19,7 +19,6 @@ import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
 import org.apache.hadoop.hbase.MiniHBaseCluster;
 import org.apache.hadoop.hbase.zookeeper.MiniZooKeeperCluster;
-import org.apache.phoenix.shaded.org.apache.zookeeper.server.ZooKeeperServer;
 
 import javax.annotation.concurrent.GuardedBy;
 
@@ -79,7 +78,7 @@ public final class TestingPhoenixServer
         // keep references to prevent GC from resetting the log levels
         apacheLogger = java.util.logging.Logger.getLogger("org.apache");
         apacheLogger.setLevel(Level.SEVERE);
-        zookeeperLogger = java.util.logging.Logger.getLogger(ZooKeeperServer.class.getName());
+        zookeeperLogger = java.util.logging.Logger.getLogger("org.apache.phoenix.shaded.org.apache.zookeeper.server.ZooKeeperServer");
         zookeeperLogger.setLevel(Level.OFF);
         securityLogger = java.util.logging.Logger.getLogger("SecurityLogger.org.apache");
         securityLogger.setLevel(Level.SEVERE);
@@ -89,7 +88,7 @@ public final class TestingPhoenixServer
         this.conf.set("hbase.security.logger", "ERROR");
         this.conf.setInt(MASTER_INFO_PORT, -1);
         this.conf.setInt(REGIONSERVER_INFO_PORT, -1);
-        this.conf.setInt(HBASE_CLIENT_RETRIES_NUMBER, 1);
+        this.conf.setInt(HBASE_CLIENT_RETRIES_NUMBER, 15);
         this.conf.setBoolean("phoenix.schema.isNamespaceMappingEnabled", true);
         this.conf.set("hbase.regionserver.wal.codec", "org.apache.hadoop.hbase.regionserver.wal.IndexedWALEditCodec");
         this.hbaseTestingUtility = new HBaseTestingUtility(conf);

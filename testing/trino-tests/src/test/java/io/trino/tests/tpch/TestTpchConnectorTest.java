@@ -62,6 +62,9 @@ public class TestTpchConnectorTest
             case SUPPORTS_CREATE_TABLE:
                 return false;
 
+            case SUPPORTS_ADD_COLUMN:
+                return false;
+
             case SUPPORTS_RENAME_TABLE:
                 return false;
 
@@ -78,6 +81,9 @@ public class TestTpchConnectorTest
             case SUPPORTS_ARRAY:
                 return false;
 
+            case SUPPORTS_ROW_TYPE:
+                return false;
+
             default:
                 return super.hasBehavior(connectorBehavior);
         }
@@ -91,7 +97,7 @@ public class TestTpchConnectorTest
         EstimatedStatsAndCost scanEstimate = new EstimatedStatsAndCost(15000.0, 1597294.0, 1597294.0, 0.0, 0.0);
         EstimatedStatsAndCost totalEstimate = new EstimatedStatsAndCost(15000.0, 1597294.0, 1597294.0, 0.0, 1597294.0);
         IoPlanPrinter.IoPlan.TableColumnInfo input = new IoPlanPrinter.IoPlan.TableColumnInfo(
-                new CatalogSchemaTableName("tpch", "sf0.01", "orders"),
+                new CatalogSchemaTableName("tpch", "tiny", "orders"),
                 ImmutableSet.of(
                         new IoPlanPrinter.ColumnConstraint(
                                 "orderstatus",
@@ -111,7 +117,7 @@ public class TestTpchConnectorTest
                 scanEstimate);
 
         ObjectMapperProvider objectMapperProvider = new ObjectMapperProvider();
-        objectMapperProvider.setJsonDeserializers(ImmutableMap.of(Type.class, new TypeDeserializer(getQueryRunner().getMetadata())));
+        objectMapperProvider.setJsonDeserializers(ImmutableMap.of(Type.class, new TypeDeserializer(getQueryRunner().getTypeManager())));
         JsonCodec<IoPlanPrinter.IoPlan> codec = new JsonCodecFactory(objectMapperProvider).jsonCodec(IoPlanPrinter.IoPlan.class);
 
         assertEquals(
@@ -129,7 +135,7 @@ public class TestTpchConnectorTest
     public void testAnalyze()
     {
         assertUpdate("ANALYZE orders", 15000);
-        assertQueryFails("ANALYZE orders WITH (foo = 'bar')", ".* does not support analyze property 'foo'.*");
+        assertQueryFails("ANALYZE orders WITH (foo = 'bar')", ".* analyze property 'foo' does not exist");
     }
 
     @Test

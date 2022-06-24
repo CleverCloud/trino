@@ -19,6 +19,7 @@ import io.trino.plugin.hive.FileWriter;
 import io.trino.plugin.hive.HdfsEnvironment;
 import io.trino.plugin.hive.HiveFileWriterFactory;
 import io.trino.plugin.hive.HiveSessionProperties;
+import io.trino.plugin.hive.NodeVersion;
 import io.trino.plugin.hive.WriterKind;
 import io.trino.plugin.hive.acid.AcidTransaction;
 import io.trino.plugin.hive.metastore.StorageFormat;
@@ -42,6 +43,7 @@ import java.util.OptionalInt;
 import java.util.Properties;
 import java.util.concurrent.Callable;
 
+import static io.trino.parquet.writer.ParquetSchemaConverter.HIVE_PARQUET_USE_LEGACY_DECIMAL_ENCODING;
 import static io.trino.plugin.hive.HiveErrorCode.HIVE_WRITER_OPEN_ERROR;
 import static io.trino.plugin.hive.HiveSessionProperties.getTimestampPrecision;
 import static io.trino.plugin.hive.util.HiveUtil.getColumnNames;
@@ -53,14 +55,17 @@ public class ParquetFileWriterFactory
         implements HiveFileWriterFactory
 {
     private final HdfsEnvironment hdfsEnvironment;
+    private final NodeVersion nodeVersion;
     private final TypeManager typeManager;
 
     @Inject
     public ParquetFileWriterFactory(
             HdfsEnvironment hdfsEnvironment,
+            NodeVersion nodeVersion,
             TypeManager typeManager)
     {
         this.hdfsEnvironment = requireNonNull(hdfsEnvironment, "hdfsEnvironment is null");
+        this.nodeVersion = requireNonNull(nodeVersion, "nodeVersion is null");
         this.typeManager = requireNonNull(typeManager, "typeManager is null");
     }
 
@@ -88,6 +93,7 @@ public class ParquetFileWriterFactory
         ParquetWriterOptions parquetWriterOptions = ParquetWriterOptions.builder()
                 .setMaxPageSize(HiveSessionProperties.getParquetWriterPageSize(session))
                 .setMaxBlockSize(HiveSessionProperties.getParquetWriterBlockSize(session))
+                .setBatchSize(HiveSessionProperties.getParquetBatchSize(session))
                 .build();
 
         CompressionCodecName compressionCodecName = getCompression(conf);
@@ -102,24 +108,25 @@ public class ParquetFileWriterFactory
                 .toArray();
 
         try {
-            FileSystem fileSystem = hdfsEnvironment.getFileSystem(session.getUser(), path, conf);
+            FileSystem fileSystem = hdfsEnvironment.getFileSystem(session.getIdentity(), path, conf);
 
             Callable<Void> rollbackAction = () -> {
                 fileSystem.delete(path, false);
                 return null;
             };
 
-            ParquetSchemaConverter schemaConverter = new ParquetSchemaConverter(fileColumnTypes, fileColumnNames);
+            ParquetSchemaConverter schemaConverter = new ParquetSchemaConverter(fileColumnTypes, fileColumnNames, HIVE_PARQUET_USE_LEGACY_DECIMAL_ENCODING);
 
             return Optional.of(new ParquetFileWriter(
-                    fileSystem.create(path),
+                    fileSystem.create(path, false),
                     rollbackAction,
                     fileColumnTypes,
                     schemaConverter.getMessageType(),
                     schemaConverter.getPrimitiveTypes(),
                     parquetWriterOptions,
                     fileInputColumnIndexes,
-                    compressionCodecName));
+                    compressionCodecName,
+                    nodeVersion.toString()));
         }
         catch (IOException e) {
             throw new TrinoException(HIVE_WRITER_OPEN_ERROR, "Error creating Parquet file", e);

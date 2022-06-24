@@ -16,8 +16,6 @@ package io.trino.cli;
 import com.google.common.base.CharMatcher;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.io.ByteStreams;
-import io.airlift.log.Logging;
-import io.airlift.log.LoggingConfiguration;
 import io.airlift.units.Duration;
 import io.trino.cli.ClientOptions.OutputFormat;
 import io.trino.cli.Trino.VersionProvider;
@@ -54,7 +52,6 @@ import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.StandardSystemProperty.USER_HOME;
 import static com.google.common.base.Strings.isNullOrEmpty;
 import static com.google.common.base.Strings.nullToEmpty;
-import static com.google.common.io.ByteStreams.nullOutputStream;
 import static com.google.common.io.Files.asCharSource;
 import static com.google.common.util.concurrent.Uninterruptibles.awaitUninterruptibly;
 import static io.trino.cli.Completion.commandCompleter;
@@ -111,8 +108,6 @@ public class Console
         boolean hasQuery = clientOptions.execute != null;
         boolean isFromFile = !isNullOrEmpty(clientOptions.file);
 
-        initializeLogging(clientOptions.logLevelsFile);
-
         String query = clientOptions.execute;
         if (hasQuery) {
             query += ";";
@@ -162,6 +157,7 @@ public class Console
         try (QueryRunner queryRunner = new QueryRunner(
                 session,
                 clientOptions.debug,
+                clientOptions.networkLogging,
                 clientOptions.socksProxy,
                 clientOptions.httpProxy,
                 clientOptions.keystorePath,
@@ -170,6 +166,7 @@ public class Console
                 clientOptions.truststorePath,
                 clientOptions.truststorePassword,
                 clientOptions.truststoreType,
+                clientOptions.useSystemTruststore,
                 clientOptions.insecure,
                 clientOptions.accessToken,
                 clientOptions.user,
@@ -181,7 +178,9 @@ public class Console
                 clientOptions.krb5KeytabPath,
                 clientOptions.krb5CredentialCachePath,
                 !clientOptions.krb5DisableRemoteServiceHostnameCanonicalization,
-                clientOptions.externalAuthentication)) {
+                false,
+                clientOptions.externalAuthentication,
+                clientOptions.externalAuthenticationRedirectHandler)) {
             if (hasQuery) {
                 return executeCommand(
                         queryRunner,
@@ -189,10 +188,10 @@ public class Console
                         query,
                         clientOptions.outputFormat,
                         clientOptions.ignoreErrors,
-                        clientOptions.progress);
+                        clientOptions.progress.orElse(false));
             }
 
-            runConsole(queryRunner, exiting);
+            runConsole(queryRunner, exiting, clientOptions.editingMode, clientOptions.progress.orElse(true), clientOptions.disableAutoSuggestion);
             return true;
         }
         finally {
@@ -222,10 +221,10 @@ public class Console
         return reader.readLine("Password: ", (char) 0);
     }
 
-    private static void runConsole(QueryRunner queryRunner, AtomicBoolean exiting)
+    private static void runConsole(QueryRunner queryRunner, AtomicBoolean exiting, ClientOptions.EditingMode editingMode, boolean progress, boolean disableAutoSuggestion)
     {
         try (TableNameCompleter tableNameCompleter = new TableNameCompleter(queryRunner);
-                InputReader reader = new InputReader(getHistoryFile(), commandCompleter(), tableNameCompleter)) {
+                InputReader reader = new InputReader(editingMode, getHistoryFile(), disableAutoSuggestion, commandCompleter(), tableNameCompleter)) {
             tableNameCompleter.populateCache();
             String remaining = "";
             while (!exiting.get()) {
@@ -290,7 +289,7 @@ public class Console
                         outputFormat = OutputFormat.VERTICAL;
                     }
 
-                    process(queryRunner, split.statement(), outputFormat, tableNameCompleter::populateCache, true, true, reader.getTerminal(), System.out, System.out);
+                    process(queryRunner, split.statement(), outputFormat, tableNameCompleter::populateCache, true, progress, reader.getTerminal(), System.out, System.out);
                 }
 
                 // replace remaining with trailing partial statement
@@ -436,33 +435,5 @@ public class Console
             return Paths.get(path);
         }
         return Paths.get(nullToEmpty(USER_HOME.value()), ".trino_history");
-    }
-
-    private static void initializeLogging(String logLevelsFile)
-    {
-        // unhook out and err while initializing logging or logger will print to them
-        PrintStream out = System.out;
-        PrintStream err = System.err;
-
-        try {
-            LoggingConfiguration config = new LoggingConfiguration();
-
-            if (logLevelsFile == null) {
-                System.setOut(new PrintStream(nullOutputStream()));
-                System.setErr(new PrintStream(nullOutputStream()));
-
-                config.setConsoleEnabled(false);
-            }
-            else {
-                config.setLevelsFile(logLevelsFile);
-            }
-
-            Logging logging = Logging.initialize();
-            logging.configure(config);
-        }
-        finally {
-            System.setOut(out);
-            System.setErr(err);
-        }
     }
 }

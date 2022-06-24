@@ -55,11 +55,12 @@ import java.util.List;
 import java.util.Optional;
 
 import static io.trino.orc.OrcWriteValidation.OrcWriteValidationMode.BOTH;
-import static io.trino.plugin.hive.HiveTestUtils.TYPE_MANAGER;
+import static io.trino.parquet.writer.ParquetSchemaConverter.HIVE_PARQUET_USE_LEGACY_DECIMAL_ENCODING;
 import static io.trino.plugin.hive.HiveTestUtils.createGenericHiveRecordCursorProvider;
 import static io.trino.plugin.hive.benchmark.AbstractFileFormat.createSchema;
 import static io.trino.plugin.hive.metastore.StorageFormat.fromHiveStorageFormat;
 import static io.trino.plugin.hive.util.CompressionConfigUtil.configureCompression;
+import static io.trino.type.InternalTypeManager.TESTING_TYPE_MANAGER;
 import static org.joda.time.DateTimeZone.UTC;
 
 public final class StandardFileFormats
@@ -77,7 +78,7 @@ public final class StandardFileFormats
         @Override
         public Optional<HivePageSourceFactory> getHivePageSourceFactory(HdfsEnvironment hdfsEnvironment)
         {
-            return Optional.of(new RcFilePageSourceFactory(TYPE_MANAGER, hdfsEnvironment, new FileFormatDataSourceStats(), new HiveConfig().setRcfileTimeZone("UTC")));
+            return Optional.of(new RcFilePageSourceFactory(TESTING_TYPE_MANAGER, hdfsEnvironment, new FileFormatDataSourceStats(), new HiveConfig().setRcfileTimeZone("UTC")));
         }
 
         @Override
@@ -108,7 +109,7 @@ public final class StandardFileFormats
         @Override
         public Optional<HivePageSourceFactory> getHivePageSourceFactory(HdfsEnvironment hdfsEnvironment)
         {
-            return Optional.of(new RcFilePageSourceFactory(TYPE_MANAGER, hdfsEnvironment, new FileFormatDataSourceStats(), new HiveConfig().setRcfileTimeZone("UTC")));
+            return Optional.of(new RcFilePageSourceFactory(TESTING_TYPE_MANAGER, hdfsEnvironment, new FileFormatDataSourceStats(), new HiveConfig().setRcfileTimeZone("UTC")));
         }
 
         @Override
@@ -298,14 +299,15 @@ public final class StandardFileFormats
         public PrestoParquetFormatWriter(File targetFile, List<String> columnNames, List<Type> types, HiveCompressionCodec compressionCodec)
                 throws IOException
         {
-            ParquetSchemaConverter schemaConverter = new ParquetSchemaConverter(types, columnNames);
+            ParquetSchemaConverter schemaConverter = new ParquetSchemaConverter(types, columnNames, HIVE_PARQUET_USE_LEGACY_DECIMAL_ENCODING);
 
             writer = new ParquetWriter(
                     new FileOutputStream(targetFile),
                     schemaConverter.getMessageType(),
                     schemaConverter.getPrimitiveTypes(),
                     ParquetWriterOptions.builder().build(),
-                    compressionCodec.getParquetCompressionCodec());
+                    compressionCodec.getParquetCompressionCodec(),
+                    "test-version");
         }
 
         @Override
@@ -413,9 +415,9 @@ public final class StandardFileFormats
                     columnNames,
                     fromHiveStorageFormat(format),
                     createSchema(format, columnNames, columnTypes),
-                    format.getEstimatedWriterSystemMemoryUsage(),
+                    format.getEstimatedWriterMemoryUsage(),
                     config,
-                    TYPE_MANAGER,
+                    TESTING_TYPE_MANAGER,
                     UTC,
                     session);
         }

@@ -14,6 +14,7 @@
 package io.trino.plugin.iceberg;
 
 import com.google.common.collect.ImmutableList;
+import io.trino.plugin.iceberg.catalog.TrinoCatalogFactory;
 import io.trino.spi.connector.ConnectorSession;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.procedure.Procedure;
@@ -24,7 +25,6 @@ import javax.inject.Provider;
 
 import java.lang.invoke.MethodHandle;
 
-import static io.trino.plugin.iceberg.IcebergUtil.loadIcebergTable;
 import static io.trino.spi.block.MethodHandleUtil.methodHandle;
 import static io.trino.spi.type.BigintType.BIGINT;
 import static io.trino.spi.type.VarcharType.VARCHAR;
@@ -41,12 +41,12 @@ public class RollbackToSnapshotProcedure
             String.class,
             Long.class);
 
-    private final HiveTableOperationsProvider tableOperationsProvider;
+    private final TrinoCatalogFactory catalogFactory;
 
     @Inject
-    public RollbackToSnapshotProcedure(HiveTableOperationsProvider tableOperationsProvider)
+    public RollbackToSnapshotProcedure(TrinoCatalogFactory catalogFactory)
     {
-        this.tableOperationsProvider = requireNonNull(tableOperationsProvider, "tableOperationsProvider is null");
+        this.catalogFactory = requireNonNull(catalogFactory, "catalogFactory is null");
     }
 
     @Override
@@ -56,16 +56,16 @@ public class RollbackToSnapshotProcedure
                 "system",
                 "rollback_to_snapshot",
                 ImmutableList.of(
-                        new Procedure.Argument("schema", VARCHAR),
-                        new Procedure.Argument("table", VARCHAR),
-                        new Procedure.Argument("snapshot_id", BIGINT)),
+                        new Procedure.Argument("SCHEMA", VARCHAR),
+                        new Procedure.Argument("TABLE", VARCHAR),
+                        new Procedure.Argument("SNAPSHOT_ID", BIGINT)),
                 ROLLBACK_TO_SNAPSHOT.bindTo(this));
     }
 
     public void rollbackToSnapshot(ConnectorSession clientSession, String schema, String table, Long snapshotId)
     {
         SchemaTableName schemaTableName = new SchemaTableName(schema, table);
-        Table icebergTable = loadIcebergTable(tableOperationsProvider, clientSession, schemaTableName);
+        Table icebergTable = catalogFactory.create(clientSession.getIdentity()).loadTable(clientSession, schemaTableName);
         icebergTable.rollback().toSnapshotId(snapshotId).commit();
     }
 }

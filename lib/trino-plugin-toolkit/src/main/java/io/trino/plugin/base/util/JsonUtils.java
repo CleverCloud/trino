@@ -13,13 +13,17 @@
  */
 package io.trino.plugin.base.util;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.annotations.VisibleForTesting;
 import io.airlift.json.ObjectMapperProvider;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -30,6 +34,10 @@ import static java.nio.file.Files.isReadable;
 
 public final class JsonUtils
 {
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapperProvider().get()
+            .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS);
+
     private JsonUtils() {}
 
     public static <T> T parseJson(Path path, Class<T> javaType)
@@ -50,13 +58,34 @@ public final class JsonUtils
         }
     }
 
+    public static JsonNode parseJson(String json)
+    {
+        try {
+            return OBJECT_MAPPER.readTree(json);
+        }
+        catch (IOException e) {
+            throw new UncheckedIOException("Could not parse JSON node from given byte array", e);
+        }
+    }
+
+    public static <T> T jsonTreeToValue(JsonNode treeNode, Class<T> javaType)
+    {
+        try {
+            return OBJECT_MAPPER.treeToValue(treeNode, javaType);
+        }
+        catch (JsonProcessingException e) {
+            throw new UncheckedIOException("Failed to parse JSON tree node", e);
+        }
+    }
+
     @VisibleForTesting
     static <T> T parseJson(byte[] jsonBytes, Class<T> javaType)
             throws IOException
     {
-        ObjectMapper mapper = new ObjectMapperProvider().get()
-                .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-                .enable(MapperFeature.ACCEPT_CASE_INSENSITIVE_ENUMS);
-        return mapper.readValue(jsonBytes, javaType);
+        try (JsonParser parser = OBJECT_MAPPER.createParser(jsonBytes)) {
+            T value = OBJECT_MAPPER.readValue(parser, javaType);
+            checkArgument(parser.nextToken() == null, "Found characters after the expected end of input");
+            return value;
+        }
     }
 }

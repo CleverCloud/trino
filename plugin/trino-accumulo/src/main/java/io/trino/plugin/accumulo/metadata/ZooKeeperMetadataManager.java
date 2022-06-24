@@ -17,8 +17,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import io.airlift.json.ObjectMapperProvider;
-import io.trino.plugin.accumulo.AccumuloModule;
 import io.trino.plugin.accumulo.conf.AccumuloConfig;
+import io.trino.plugin.base.TypeDeserializer;
 import io.trino.spi.TrinoException;
 import io.trino.spi.connector.SchemaTableName;
 import io.trino.spi.type.Type;
@@ -44,7 +44,7 @@ import static org.apache.zookeeper.KeeperException.Code.NONODE;
 
 public class ZooKeeperMetadataManager
 {
-    private static final String DEFAULT_SCHEMA = "default";
+    public static final String DEFAULT_SCHEMA = "default";
 
     private final CuratorFramework curator;
     private final ObjectMapper mapper;
@@ -56,7 +56,7 @@ public class ZooKeeperMetadataManager
 
         // Create JSON deserializer for the AccumuloTable
         ObjectMapperProvider objectMapperProvider = new ObjectMapperProvider();
-        objectMapperProvider.setJsonDeserializers(ImmutableMap.of(Type.class, new AccumuloModule.TypeDeserializer(typeManager)));
+        objectMapperProvider.setJsonDeserializers(ImmutableMap.of(Type.class, new TypeDeserializer(typeManager)));
         mapper = objectMapperProvider.get();
 
         String zkMetadataRoot = config.getZkMetadataRoot();
@@ -89,6 +89,26 @@ public class ZooKeeperMetadataManager
         }
         catch (Exception e) {
             throw new TrinoException(ZOOKEEPER_ERROR, "ZK error checking/creating default schema", e);
+        }
+    }
+
+    public void createSchema(String schemaName)
+    {
+        try {
+            curator.create().forPath("/" + schemaName);
+        }
+        catch (Exception e) {
+            throw new TrinoException(ZOOKEEPER_ERROR, "ZK error creating schema: " + schemaName, e);
+        }
+    }
+
+    public void dropSchema(String schemaName)
+    {
+        try {
+            curator.delete().forPath("/" + schemaName);
+        }
+        catch (Exception e) {
+            throw new TrinoException(ZOOKEEPER_ERROR, "ZK error deleting schema: " + schemaName, e);
         }
     }
 

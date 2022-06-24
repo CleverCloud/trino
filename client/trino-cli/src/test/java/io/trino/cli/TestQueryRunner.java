@@ -23,6 +23,7 @@ import io.trino.client.ClientTypeSignature;
 import io.trino.client.Column;
 import io.trino.client.QueryResults;
 import io.trino.client.StatementStats;
+import okhttp3.logging.HttpLoggingInterceptor;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import org.testng.annotations.AfterMethod;
@@ -43,6 +44,7 @@ import static io.airlift.json.JsonCodec.jsonCodec;
 import static io.trino.cli.ClientOptions.OutputFormat.CSV;
 import static io.trino.cli.TerminalUtils.getTerminal;
 import static io.trino.client.ClientStandardTypes.BIGINT;
+import static io.trino.client.auth.external.ExternalRedirectStrategy.PRINT;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNull;
@@ -102,7 +104,7 @@ public class TestQueryRunner
     {
         return new ClientSession(
                 server.url("/").uri(),
-                "user",
+                Optional.of("user"),
                 Optional.empty(),
                 "source",
                 Optional.empty(),
@@ -110,7 +112,7 @@ public class TestQueryRunner
                 "clientInfo",
                 "catalog",
                 "schema",
-                "path",
+                null,
                 ZoneId.of("America/Los_Angeles"),
                 Locale.ENGLISH,
                 ImmutableMap.of(),
@@ -146,6 +148,7 @@ public class TestQueryRunner
         return new QueryRunner(
                 clientSession,
                 false,
+                HttpLoggingInterceptor.Level.NONE,
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
@@ -154,6 +157,7 @@ public class TestQueryRunner
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
+                false,
                 insecureSsl,
                 Optional.empty(),
                 Optional.empty(),
@@ -165,7 +169,9 @@ public class TestQueryRunner
                 Optional.empty(),
                 Optional.empty(),
                 false,
-                false);
+                false,
+                false,
+                ImmutableList.of(PRINT));
     }
 
     static PrintStream nullPrintStream()

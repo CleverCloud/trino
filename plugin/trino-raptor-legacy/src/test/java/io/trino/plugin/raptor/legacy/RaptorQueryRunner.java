@@ -16,7 +16,6 @@ package io.trino.plugin.raptor.legacy;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.log.Logger;
-import io.airlift.log.Logging;
 import io.trino.Session;
 import io.trino.connector.CatalogName;
 import io.trino.metadata.QualifiedObjectName;
@@ -64,13 +63,12 @@ public final class RaptorQueryRunner
         Map<String, String> raptorProperties = ImmutableMap.<String, String>builder()
                 .putAll(extraRaptorProperties)
                 .put("metadata.db.type", "h2")
-                .put("metadata.db.connections.max", "100")
                 .put("metadata.db.filename", new File(baseDir, "db").getAbsolutePath())
                 .put("storage.data-directory", new File(baseDir, "data").getAbsolutePath())
                 .put("storage.max-shard-rows", "2000")
                 .put("backup.provider", "file")
                 .put("backup.directory", new File(baseDir, "backup").getAbsolutePath())
-                .build();
+                .buildOrThrow();
 
         queryRunner.createCatalog("raptor", "raptor-legacy", raptorProperties);
 
@@ -117,7 +115,7 @@ public final class RaptorQueryRunner
                 throw new IllegalArgumentException("Unsupported table: " + table);
             }
         }
-        Map<TpchTable<?>, String> tablesMap = tablesMapBuilder.build();
+        Map<TpchTable<?>, String> tablesMap = tablesMapBuilder.buildOrThrow();
 
         log.info("Loading data from %s.%s...", catalog, schema);
         long startTime = System.nanoTime();
@@ -160,7 +158,6 @@ public final class RaptorQueryRunner
     public static void main(String[] args)
             throws Exception
     {
-        Logging.initialize();
         Map<String, String> properties = ImmutableMap.of("http-server.http.port", "8080");
         DistributedQueryRunner queryRunner = createRaptorQueryRunner(properties, ImmutableList.of(), false, ImmutableMap.of());
         Thread.sleep(10);

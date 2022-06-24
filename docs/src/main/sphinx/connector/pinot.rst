@@ -2,13 +2,21 @@
 Pinot connector
 ===============
 
+.. raw:: html
+
+  <img src="../_static/img/pinot.png" class="connector-logo">
+
 The Pinot connector allows Trino to query data stored in
 `Apache Pinot™ <https://pinot.apache.org/>`_.
 
-Compatibility
--------------
+Requirements
+------------
 
-The Pinot connector is compatible with all Pinot versions starting from 0.1.0.
+To connect to Pinot, you need:
+
+* Pinot 0.9.3 or higher.
+* Network access from the Trino coordinator and workers to the Pinot controller
+  nodes. Port 8098 is the default port.
 
 Configuration
 -------------
@@ -19,9 +27,9 @@ e.g. ``etc/catalog/pinot.properties`` with at least the following contents:
 .. code-block:: text
 
     connector.name=pinot
-    pinot.controller-urls=host1:9000,host2:9000
+    pinot.controller-urls=host1:8098,host2:8098
 
-Replace ``host1:9000,host2:9000`` with a comma-separated list of Pinot Controller nodes.
+Replace ``host1:8098,host2:8098`` with a comma-separated list of Pinot controller nodes.
 This can be the ip or the FDQN, the url scheme (``http://``) is optional.
 
 Configuration properties
@@ -29,18 +37,35 @@ Configuration properties
 
 The following configuration properties are available:
 
-============================== ========== ==============================================================================
-Property Name                  Required   Description
-============================== ========== ==============================================================================
-``pinot.controller-urls``      Yes        A comma separated list of controller hosts. If Pinot is deployed via
-                                          `Kubernetes <https://kubernetes.io/>`_ this needs to point to the controller
-                                          service endpoint. The Pinot broker and server must be accessible via DNS as
-                                          Pinot returns hostnames and not IP addresses.
-``pinot.segments-per-split``   No         The number of segments processed in a split. Setting this higher reduces the
-                                          number of requests made to Pinot. This is useful for smaller Pinot clusters.
-``pinot.request-timeout``      No         The timeout for Pinot requests. Increasing this can reduce timeouts if DNS
-                                          resolution is slow.
-============================== ========== ==============================================================================
+============================================= ========== ==============================================================================
+Property Name                                 Required   Description
+============================================= ========== ==============================================================================
+``pinot.controller-urls``                     Yes        A comma separated list of controller hosts. If Pinot is deployed via
+                                                         `Kubernetes <https://kubernetes.io/>`_ this needs to point to the controller
+                                                         service endpoint. The Pinot broker and server must be accessible via DNS as
+                                                         Pinot returns hostnames and not IP addresses.
+``pinot.segments-per-split``                  No         The number of segments processed in a split. Setting this higher reduces the
+                                                         number of requests made to Pinot. This is useful for smaller Pinot clusters.
+``pinot.request-timeout``                     No         The timeout for Pinot requests. Increasing this can reduce timeouts if DNS
+                                                         resolution is slow.
+``pinot.controller.authentication.type``      No         Pinot authentication method for controller requests. Allowed values are
+                                                         ``NONE`` and ``PASSWORD`` - defaults to ``NONE`` which is no authentication.
+``pinot.controller.authentication.user``      No         Controller username for basic authentication method.
+``pinot.controller.authentication.password``  No         Controller password for basic authentication method.
+``pinot.broker.authentication.type``          No         Pinot authentication method for broker requests. Allowed values are
+                                                         ``NONE`` and ``PASSWORD`` - defaults to ``NONE`` which is no
+                                                         authentication.
+``pinot.broker.authentication.user``          No         Broker username for basic authentication method.
+``pinot.broker.authentication.password``      No         Broker password for basic authentication method.
+============================================= ========== ==============================================================================
+
+If ``pinot.controller.authentication.type`` is set to ``PASSWORD`` then both ``pinot.controller.authentication.user`` and
+``pinot.controller.authentication.password`` are required.
+
+If ``pinot.broker.authentication.type`` is set to ``PASSWORD`` then both ``pinot.broker.authentication.user`` and
+``pinot.broker.authentication.password`` are required.
+
+You can use :doc:`secrets </security/secrets>` to avoid actual values in the catalog properties files.
 
 Querying Pinot tables
 ---------------------
@@ -110,3 +135,38 @@ Pinot                        Trino
 ``STRING_ARRAY``             ``VARCHAR``
 ==========================   ============
 
+.. _pinot-sql-support:
+
+SQL support
+-----------
+
+The connector provides :ref:`globally available <sql-globally-available>` and
+:ref:`read operation <sql-read-operations>` statements to access data and
+metadata in Pinot.
+
+.. _pinot-pushdown:
+
+Pushdown
+--------
+
+The connector supports pushdown for a number of operations:
+
+* :ref:`limit-pushdown`
+
+:ref:`Aggregate pushdown <aggregation-pushdown>` for the following functions:
+
+* :func:`avg`
+* :func:`approx_distinct`
+* ``count(*)`` and ``count(distinct)`` variations of :func:`count`
+* :func:`max`
+* :func:`min`
+* :func:`sum`
+
+Aggregate function pushdown is enabled by default, but can be disabled with the
+catalog property ``pinot.aggregation-pushdown.enabled`` or the catalog session
+property ``aggregation_pushdown_enabled``.
+
+A ``count(distint)`` pushdown may cause Pinot to run a full table scan with
+significant performance impact. If you encounter this problem, you can disable
+it with the catalog property ``pinot.count-distinct-pushdown.enabled`` or the
+catalog session property ``count_distinct_pushdown_enabled``.

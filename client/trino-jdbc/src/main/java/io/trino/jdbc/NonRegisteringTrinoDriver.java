@@ -54,9 +54,8 @@ public class NonRegisteringTrinoDriver
 
         OkHttpClient.Builder builder = httpClient.newBuilder();
         uri.setupClient(builder);
-        QueryExecutor executor = new QueryExecutor(builder.build());
 
-        return new TrinoConnection(uri, executor);
+        return new TrinoConnection(uri, builder.build());
     }
 
     @Override
@@ -73,11 +72,22 @@ public class NonRegisteringTrinoDriver
     public DriverPropertyInfo[] getPropertyInfo(String url, Properties info)
             throws SQLException
     {
-        Properties properties = TrinoDriverUri.create(url, info).getProperties();
+        Properties properties = urlProperties(url, info);
 
         return ConnectionProperties.allProperties().stream()
+                .filter(property -> property.isAllowed(properties))
                 .map(property -> property.getDriverPropertyInfo(properties))
                 .toArray(DriverPropertyInfo[]::new);
+    }
+
+    private static Properties urlProperties(String url, Properties info)
+    {
+        try {
+            return TrinoDriverUri.create(url, info).getProperties();
+        }
+        catch (SQLException e) {
+            return info;
+        }
     }
 
     @Override

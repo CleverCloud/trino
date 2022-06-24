@@ -48,6 +48,7 @@ import io.trino.spi.type.ArrayType;
 import io.trino.spi.type.CharType;
 import io.trino.spi.type.DecimalType;
 import io.trino.spi.type.Decimals;
+import io.trino.spi.type.Int128;
 import io.trino.spi.type.MapType;
 import io.trino.spi.type.RowType;
 import io.trino.spi.type.SqlDate;
@@ -96,6 +97,8 @@ import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.Iterables.transform;
 import static io.airlift.slice.Slices.utf8Slice;
+import static io.trino.hadoop.ConfigurationInstantiator.newEmptyConfiguration;
+import static io.trino.parquet.writer.ParquetSchemaConverter.HIVE_PARQUET_USE_LEGACY_DECIMAL_ENCODING;
 import static io.trino.plugin.hive.AbstractTestHiveFileFormats.getFieldFromCursor;
 import static io.trino.plugin.hive.HiveSessionProperties.getParquetMaxReadBlockSize;
 import static io.trino.plugin.hive.HiveTestUtils.HDFS_ENVIRONMENT;
@@ -333,7 +336,7 @@ public class ParquetTester
             for (CompressionCodecName compressionCodecName : compressions) {
                 for (ConnectorSession session : sessions) {
                     try (TempFile tempFile = new TempFile("test", "parquet")) {
-                        JobConf jobConf = new JobConf();
+                        JobConf jobConf = new JobConf(newEmptyConfiguration());
                         jobConf.setEnum(COMPRESSION, compressionCodecName);
                         jobConf.setBoolean(ENABLE_DICTIONARY, true);
                         jobConf.setEnum(WRITER_VERSION, version);
@@ -413,7 +416,7 @@ public class ParquetTester
                 .build();
 
         try (TempFile tempFile = new TempFile("test", "parquet")) {
-            JobConf jobConf = new JobConf();
+            JobConf jobConf = new JobConf(newEmptyConfiguration());
             jobConf.setEnum(COMPRESSION, compressionCodecName);
             jobConf.setBoolean(ENABLE_DICTIONARY, true);
             jobConf.setEnum(WRITER_VERSION, PARQUET_1_0);
@@ -720,7 +723,7 @@ public class ParquetTester
             throws Exception
     {
         checkArgument(types.size() == columnNames.size() && types.size() == values.length);
-        ParquetSchemaConverter schemaConverter = new ParquetSchemaConverter(types, columnNames);
+        ParquetSchemaConverter schemaConverter = new ParquetSchemaConverter(types, columnNames, HIVE_PARQUET_USE_LEGACY_DECIMAL_ENCODING);
         ParquetWriter writer = new ParquetWriter(
                 new FileOutputStream(outputFile),
                 schemaConverter.getMessageType(),
@@ -729,7 +732,8 @@ public class ParquetTester
                         .setMaxPageSize(DataSize.ofBytes(100))
                         .setMaxBlockSize(DataSize.ofBytes(100000))
                         .build(),
-                compressionCodecName);
+                compressionCodecName,
+                "test-version");
 
         PageBuilder pageBuilder = new PageBuilder(types);
         for (int i = 0; i < types.size(); ++i) {
@@ -765,10 +769,10 @@ public class ParquetTester
             }
             else if (Decimals.isLongDecimal(type)) {
                 if (Decimals.overflows(((SqlDecimal) value).getUnscaledValue(), MAX_PRECISION_INT64)) {
-                    type.writeSlice(blockBuilder, Decimals.encodeUnscaledValue(((SqlDecimal) value).toBigDecimal().unscaledValue()));
+                    type.writeObject(blockBuilder, Int128.valueOf(((SqlDecimal) value).toBigDecimal().unscaledValue()));
                 }
                 else {
-                    type.writeSlice(blockBuilder, Decimals.encodeUnscaledValue(((SqlDecimal) value).getUnscaledValue().longValue()));
+                    type.writeObject(blockBuilder, Int128.valueOf(((SqlDecimal) value).getUnscaledValue().longValue()));
                 }
             }
             else if (DOUBLE.equals(type)) {

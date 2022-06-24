@@ -79,7 +79,10 @@ public final class PlanCopier
         @Override
         public PlanNode visitAggregation(AggregationNode node, RewriteContext<Void> context)
         {
-            return new AggregationNode(idAllocator.getNextId(), context.rewrite(node.getSource()), node.getAggregations(), node.getGroupingSets(), node.getPreGroupedSymbols(), node.getStep(), node.getHashSymbol(), node.getGroupIdSymbol());
+            return AggregationNode.builderFrom(node)
+                    .setId(idAllocator.getNextId())
+                    .setSource(context.rewrite(node.getSource()))
+                    .build();
         }
 
         @Override
@@ -181,6 +184,7 @@ public final class PlanCopier
                     node.getHashSymbol(),
                     node.getPrePartitionedInputs(),
                     node.getPreSortedOrderPrefix(),
+                    node.getWindowFunctions(),
                     node.getMeasures(),
                     node.getCommonBaseFrame(),
                     node.getRowsPerMatch(),

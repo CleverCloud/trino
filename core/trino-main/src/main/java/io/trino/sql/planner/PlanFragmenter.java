@@ -22,9 +22,11 @@ import io.trino.cost.StatsAndCosts;
 import io.trino.execution.QueryManagerConfig;
 import io.trino.execution.scheduler.BucketNodeMap;
 import io.trino.execution.warnings.WarningCollector;
+import io.trino.metadata.FunctionManager;
 import io.trino.metadata.Metadata;
 import io.trino.metadata.TableHandle;
 import io.trino.metadata.TableProperties.TablePartitioning;
+import io.trino.operator.RetryPolicy;
 import io.trino.spi.TrinoException;
 import io.trino.spi.TrinoWarning;
 import io.trino.spi.connector.ConnectorPartitionHandle;
@@ -35,6 +37,7 @@ import io.trino.sql.planner.plan.ExchangeNode;
 import io.trino.sql.planner.plan.ExplainAnalyzeNode;
 import io.trino.sql.planner.plan.JoinNode;
 import io.trino.sql.planner.plan.OutputNode;
+import io.trino.sql.planner.plan.PatternRecognitionNode;
 import io.trino.sql.planner.plan.PlanFragmentId;
 import io.trino.sql.planner.plan.PlanNode;
 import io.trino.sql.planner.plan.PlanNodeId;
@@ -43,6 +46,7 @@ import io.trino.sql.planner.plan.RefreshMaterializedViewNode;
 import io.trino.sql.planner.plan.RemoteSourceNode;
 import io.trino.sql.planner.plan.RowNumberNode;
 import io.trino.sql.planner.plan.SimplePlanRewriter;
+import io.trino.sql.planner.plan.SimpleTableExecuteNode;
 import io.trino.sql.planner.plan.StatisticsWriterNode;
 import io.trino.sql.planner.plan.TableDeleteNode;
 import io.trino.sql.planner.plan.TableFinishNode;
@@ -67,6 +71,7 @@ import static com.google.common.base.Predicates.in;
 import static com.google.common.collect.ImmutableList.toImmutableList;
 import static com.google.common.collect.Iterables.getOnlyElement;
 import static io.trino.SystemSessionProperties.getQueryMaxStageCount;
+import static io.trino.SystemSessionProperties.getRetryPolicy;
 import static io.trino.SystemSessionProperties.isDynamicScheduleForGroupedExecution;
 import static io.trino.SystemSessionProperties.isForceSingleNodeOutput;
 import static io.trino.operator.StageExecutionDescriptor.ungroupedExecution;
@@ -93,20 +98,26 @@ public class PlanFragmenter
             "If the query contains WITH clauses that are referenced more than once, please create temporary table(s) for the queries in those clauses.";
 
     private final Metadata metadata;
+    private final FunctionManager functionManager;
     private final NodePartitioningManager nodePartitioningManager;
     private final QueryManagerConfig config;
 
     @Inject
-    public PlanFragmenter(Metadata metadata, NodePartitioningManager nodePartitioningManager, QueryManagerConfig queryManagerConfig)
+    public PlanFragmenter(
+            Metadata metadata,
+            FunctionManager functionManager,
+            NodePartitioningManager nodePartitioningManager,
+            QueryManagerConfig queryManagerConfig)
     {
         this.metadata = requireNonNull(metadata, "metadata is null");
+        this.functionManager = requireNonNull(functionManager, "functionManager is null");
         this.nodePartitioningManager = requireNonNull(nodePartitioningManager, "nodePartitioningManager is null");
         this.config = requireNonNull(queryManagerConfig, "queryManagerConfig is null");
     }
 
     public SubPlan createSubPlans(Session session, Plan plan, boolean forceSingleNode, WarningCollector warningCollector)
     {
-        Fragmenter fragmenter = new Fragmenter(session, metadata, plan.getTypes(), plan.getStatsAndCosts());
+        Fragmenter fragmenter = new Fragmenter(session, metadata, functionManager, plan.getTypes(), plan.getStatsAndCosts());
 
         FragmentProperties properties = new FragmentProperties(new PartitioningScheme(Partitioning.create(SINGLE_DISTRIBUTION, ImmutableList.of()), plan.getRoot().getOutputSymbols()));
         if (forceSingleNode || isForceSingleNodeOutput(session)) {
@@ -187,7 +198,7 @@ public class PlanFragmenter
         Partitioning newOutputPartitioning = outputPartitioningScheme.getPartitioning();
         if (outputPartitioningScheme.getPartitioning().getHandle().getConnectorId().isPresent()) {
             // Do not replace the handle if the source's output handle is a system one, e.g. broadcast.
-            newOutputPartitioning = newOutputPartitioning.withAlternativePartitiongingHandle(newOutputPartitioningHandle);
+            newOutputPartitioning = newOutputPartitioning.withAlternativePartitioningHandle(newOutputPartitioningHandle);
         }
         PlanFragment newFragment = new PlanFragment(
                 fragment.getId(),
@@ -219,14 +230,16 @@ public class PlanFragmenter
 
         private final Session session;
         private final Metadata metadata;
+        private final FunctionManager functionManager;
         private final TypeProvider types;
         private final StatsAndCosts statsAndCosts;
         private int nextFragmentId = ROOT_FRAGMENT_ID + 1;
 
-        public Fragmenter(Session session, Metadata metadata, TypeProvider types, StatsAndCosts statsAndCosts)
+        public Fragmenter(Session session, Metadata metadata, FunctionManager functionManager, TypeProvider types, StatsAndCosts statsAndCosts)
         {
             this.session = requireNonNull(session, "session is null");
             this.metadata = requireNonNull(metadata, "metadata is null");
+            this.functionManager = requireNonNull(functionManager, "functionManager is null");
             this.types = requireNonNull(types, "types is null");
             this.statsAndCosts = requireNonNull(statsAndCosts, "statsAndCosts is null");
         }
@@ -260,7 +273,7 @@ public class PlanFragmenter
                     properties.getPartitioningScheme(),
                     ungroupedExecution(),
                     statsAndCosts.getForSubplan(root),
-                    Optional.of(jsonFragmentPlan(root, symbols, metadata, session)));
+                    Optional.of(jsonFragmentPlan(root, symbols, metadata, functionManager, session)));
 
             return new SubPlan(fragment, properties.getChildren());
         }
@@ -284,6 +297,13 @@ public class PlanFragmenter
 
         @Override
         public PlanNode visitStatisticsWriterNode(StatisticsWriterNode node, RewriteContext<FragmentProperties> context)
+        {
+            context.get().setCoordinatorOnlyDistribution();
+            return context.defaultRewrite(node, context.get());
+        }
+
+        @Override
+        public PlanNode visitSimpleTableExecuteNode(SimpleTableExecuteNode node, RewriteContext<FragmentProperties> context)
         {
             context.get().setCoordinatorOnlyDistribution();
             return context.defaultRewrite(node, context.get());
@@ -355,13 +375,15 @@ public class PlanFragmenter
                 context.get().setDistribution(partitioningScheme.getPartitioning().getHandle(), metadata, session);
             }
 
-            ImmutableList.Builder<SubPlan> builder = ImmutableList.builder();
+            ImmutableList.Builder<FragmentProperties> childrenProperties = ImmutableList.builder();
+            ImmutableList.Builder<SubPlan> childrenBuilder = ImmutableList.builder();
             for (int sourceIndex = 0; sourceIndex < exchange.getSources().size(); sourceIndex++) {
                 FragmentProperties childProperties = new FragmentProperties(partitioningScheme.translateOutputLayout(exchange.getInputs().get(sourceIndex)));
-                builder.add(buildSubPlan(exchange.getSources().get(sourceIndex), childProperties, context));
+                childrenProperties.add(childProperties);
+                childrenBuilder.add(buildSubPlan(exchange.getSources().get(sourceIndex), childProperties, context));
             }
 
-            List<SubPlan> children = builder.build();
+            List<SubPlan> children = childrenBuilder.build();
             context.get().addChildren(children);
 
             List<PlanFragmentId> childrenIds = children.stream()
@@ -369,7 +391,13 @@ public class PlanFragmenter
                     .map(PlanFragment::getId)
                     .collect(toImmutableList());
 
-            return new RemoteSourceNode(exchange.getId(), childrenIds, exchange.getOutputSymbols(), exchange.getOrderingScheme(), exchange.getType());
+            return new RemoteSourceNode(
+                    exchange.getId(),
+                    childrenIds,
+                    exchange.getOutputSymbols(),
+                    exchange.getOrderingScheme(),
+                    exchange.getType(),
+                    isWorkerCoordinatorBoundary(context.get(), childrenProperties.build()) ? getRetryPolicy(session) : RetryPolicy.NONE);
         }
 
         private SubPlan buildSubPlan(PlanNode node, FragmentProperties properties, RewriteContext<FragmentProperties> context)
@@ -377,6 +405,22 @@ public class PlanFragmenter
             PlanFragmentId planFragmentId = nextFragmentId();
             PlanNode child = context.rewrite(node, properties);
             return buildFragment(child, properties, planFragmentId);
+        }
+
+        private static boolean isWorkerCoordinatorBoundary(FragmentProperties fragmentProperties, List<FragmentProperties> childFragmentsProperties)
+        {
+            if (!fragmentProperties.getPartitioningHandle().isCoordinatorOnly()) {
+                // receiver stage is not a coordinator stage
+                return false;
+            }
+            if (childFragmentsProperties.stream().allMatch(properties -> properties.getPartitioningHandle().isCoordinatorOnly())) {
+                // coordinator to coordinator exchange
+                return false;
+            }
+            checkArgument(
+                    childFragmentsProperties.stream().noneMatch(properties -> properties.getPartitioningHandle().isCoordinatorOnly()),
+                    "Plans are not expected to have a mix of coordinator only fragments and distributed fragments as siblings");
+            return true;
         }
     }
 
@@ -571,6 +615,10 @@ public class PlanFragmenter
             GroupedExecutionProperties left = node.getLeft().accept(this, null);
             GroupedExecutionProperties right = node.getRight().accept(this, null);
 
+            if (!groupedExecutionEnabled) {
+                return GroupedExecutionProperties.notCapable();
+            }
+
             if (node.getDistributionType().isEmpty()) {
                 // This is possible when the optimizers is invoked with `forceSingleNode` set to true.
                 return GroupedExecutionProperties.notCapable();
@@ -670,6 +718,12 @@ public class PlanFragmenter
             if (groupedExecutionEnabled && properties.isCurrentNodeCapable()) {
                 return new GroupedExecutionProperties(true, true, properties.capableTableScanNodes);
             }
+            return GroupedExecutionProperties.notCapable();
+        }
+
+        @Override
+        public GroupedExecutionProperties visitPatternRecognition(PatternRecognitionNode node, Void context)
+        {
             return GroupedExecutionProperties.notCapable();
         }
 
