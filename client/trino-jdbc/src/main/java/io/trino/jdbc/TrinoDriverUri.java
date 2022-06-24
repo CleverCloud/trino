@@ -267,13 +267,12 @@ public final class TrinoDriverUri
             setupHttpProxy(builder, HTTP_PROXY.getValue(properties));
 
             // TODO: fix Tempto to allow empty passwords
+            String user = USER.getValue(properties).orElse("");
             String password = PASSWORD.getValue(properties).orElse("");
-            if (!password.isEmpty() && !password.equals("***empty***")) {
-                if (!useSecureConnection) {
-                    throw new SQLException("Authentication using username/password requires SSL to be enabled");
-                }
-                builder.addInterceptor(basicAuth(getRequiredUser(), password));
+            if (!user.isEmpty() || !password.isEmpty()) {
+                builder.addInterceptor(basicAuth(user, password));
             }
+
 
             if (useSecureConnection) {
                 SslVerificationMode sslVerificationMode = SSL_VERIFICATION.getValue(properties).orElse(FULL);
